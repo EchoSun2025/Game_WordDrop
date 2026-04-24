@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>LexiLand Word Game Minimal</title>
+    <title>WordDrop</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
     <main class="app-shell">
       <section class="intro-panel">
-        <p class="eyebrow">LEXILAND / WORD GAME / MINIMAL V1</p>
-        <h1>下落单词选图</h1>
+        <p class="eyebrow">WORDDROP / STANDALONE VOCAB GAME</p>
+        <h1>WordDrop</h1>
         <p class="intro-copy">
-          最小版只保留核心循环：单词下落、3 个图片篮子、点击命中得分、语音朗读和基础反馈。
+          脱离 LexiLand 也能玩。导入当日生词 JSON 后，就能切换图像匹配、句子匹配和限时造句 3 个玩法。
         </p>
       </section>
 
@@ -27,7 +27,7 @@
             <strong id="energyValue">0</strong>
           </div>
           <div class="stat-chip">
-            <span class="stat-label">Learned</span>
+            <span class="stat-label">Played</span>
             <strong id="learnedValue">0</strong>
           </div>
           <div class="stat-chip">
@@ -36,11 +36,35 @@
           </div>
         </header>
 
+        <section class="mode-panel" aria-label="玩法模式">
+          <button class="mode-button is-active" data-mode="image" type="button">1 图像匹配</button>
+          <button class="mode-button" data-mode="sentence" type="button">2 句子匹配</button>
+          <button class="mode-button" data-mode="builder" type="button">3 限时造句</button>
+        </section>
+
+        <section class="data-panel">
+          <div class="data-copy">
+            <p class="tiny-label">DATA PACK</p>
+            <strong id="packName">Starter Pack</strong>
+            <p id="packMeta">6 words loaded.</p>
+          </div>
+
+          <div class="data-actions">
+            <label class="secondary-button" for="importFile">导入 JSON</label>
+            <input id="importFile" type="file" accept=".json,application/json" hidden />
+            <button id="resetPackButton" class="ghost-button" type="button">恢复内置包</button>
+          </div>
+        </section>
+
         <section class="playfield">
           <div class="playfield-header">
             <div>
               <p class="tiny-label">ROUND</p>
-              <strong id="roundValue">1 / 6</strong>
+              <strong id="roundValue">0 / 0</strong>
+            </div>
+            <div class="mode-block">
+              <p class="tiny-label">MODE</p>
+              <strong id="modeValue">图像匹配</strong>
             </div>
             <div class="level-block">
               <p class="tiny-label">LEVEL</p>
@@ -50,7 +74,7 @@
 
           <div class="fall-lane">
             <div class="fall-track"></div>
-            <div id="fallingWord" class="falling-word">APPLE</div>
+            <div id="fallingWord" class="falling-word">READY</div>
             <div class="danger-line"></div>
           </div>
 
@@ -58,17 +82,18 @@
             <div class="timer-rail">
               <div id="timerFill" class="timer-fill"></div>
             </div>
-            <span id="timerText">4.5s</span>
+            <span id="timerText">0.0s</span>
           </div>
         </section>
 
-        <section id="basketGrid" class="basket-grid" aria-label="图片篮子"></section>
+        <section id="challengePanel" class="challenge-panel"></section>
 
         <section class="feedback-panel">
           <div class="feedback-copy">
             <p class="tiny-label">FEEDBACK</p>
             <h2 id="feedbackTitle">准备开始</h2>
-            <p id="feedbackText">点任意篮子开始第一轮。</p>
+            <p id="feedbackText">先选择模式，然后点开始。</p>
+            <p id="feedbackTranscript" class="feedback-transcript">Voice: off</p>
             <div class="feedback-meta">
               <span id="feedbackWord">Word: --</span>
               <span id="feedbackPos">POS: --</span>
@@ -81,7 +106,9 @@
 
         <footer class="controls">
           <button id="startButton" class="primary-button" type="button">开始 / 重新开始</button>
-          <p class="hint-text">支持鼠标点击，也支持键盘 `1 / 2 / 3` 选篮子。</p>
+          <p class="hint-text" id="hintText">
+            图像匹配和句子匹配支持键盘 `1 / 2 / 3`。句子匹配和造句模式支持浏览器语音识别，若浏览器允许的话会自动启用。
+          </p>
         </footer>
       </section>
     </main>
