@@ -1,3 +1,6 @@
+const API_BASE_URL = 'http://localhost:3030';
+const WORDDROP_TRANSCRIBE_URL = `${API_BASE_URL}/api/transcribe`;
+
 const refs = {
   statusList: document.getElementById('statusList'),
   refreshStatusButton: document.getElementById('refreshStatusButton'),
@@ -10,12 +13,10 @@ const refs = {
   eventLog: document.getElementById('eventLog'),
 };
 
-const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-
 const state = {
-  recognition: null,
-  finalText: '',
-  interimText: '',
+  mediaRecorder: null,
+  mediaStream: null,
+  audioChunks: [],
 };
 
 function appendLog(message) {
@@ -28,9 +29,32 @@ function setStatus(text) {
   appendLog(text);
 }
 
-function renderText() {
-  refs.interimOutput.value = state.interimText;
-  refs.finalOutput.value = state.finalText;
+function getSupportedAudioMimeType() {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+  ];
+
+  return candidates.find((mimeType) => window.MediaRecorder?.isTypeSupported?.(mimeType)) || '';
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read recorded audio.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function checkBackend() {
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/test`);
+    return response.ok ? 'reachable' : `http ${response.status}`;
+  } catch {
+    return 'unreachable';
+  }
 }
 
 async function getPermissionState() {
@@ -45,11 +69,13 @@ async function getPermissionState() {
 
 async function refreshStatus() {
   const permission = await getPermissionState();
+  const backend = await checkBackend();
   const items = [
-    ['API', RecognitionClass ? 'supported' : 'not supported'],
+    ['MediaRecorder', window.MediaRecorder ? 'supported' : 'not supported'],
     ['Protocol', window.location.protocol || 'unknown'],
     ['Secure Context', window.isSecureContext ? 'yes' : 'no'],
     ['Mic Permission', permission],
+    ['Backend', backend],
     ['User Agent', navigator.userAgent],
   ];
 
@@ -61,82 +87,107 @@ async function refreshStatus() {
   `).join('');
 }
 
-function stopRecognition() {
-  if (state.recognition) {
-    state.recognition.stop();
+function releaseAudioStream() {
+  if (state.mediaStream) {
+    state.mediaStream.getTracks().forEach((track) => track.stop());
+    state.mediaStream = null;
   }
 }
 
-function buildRecognition() {
-  if (!RecognitionClass) {
-    setStatus('SpeechRecognition not supported in this browser');
-    return null;
+async function startRecording() {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    throw new Error('Browser recording is not supported.');
   }
 
-  const recognition = new RecognitionClass();
-  recognition.lang = refs.languageSelect.value;
-  recognition.continuous = true;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 3;
+  const mimeType = getSupportedAudioMimeType();
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
 
-  recognition.onstart = () => setStatus('recognition started');
-  recognition.onaudiostart = () => setStatus('microphone audio started');
-  recognition.onsoundstart = () => setStatus('sound detected');
-  recognition.onspeechstart = () => setStatus('speech detected');
-  recognition.onspeechend = () => setStatus('speech ended');
-  recognition.onsoundend = () => setStatus('sound ended');
-  recognition.onaudioend = () => setStatus('audio ended');
-  recognition.onnomatch = () => setStatus('no match');
+  state.audioChunks = [];
+  state.mediaStream = stream;
+  state.mediaRecorder = recorder;
 
-  recognition.onresult = (event) => {
-    let finalText = state.finalText;
-    let interimText = '';
-
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const result = event.results[index];
-      const text = result[0]?.transcript || '';
-      if (result.isFinal) {
-        finalText += `${text} `;
-      } else {
-        interimText += text;
-      }
+  recorder.addEventListener('dataavailable', (event) => {
+    if (event.data && event.data.size > 0) {
+      state.audioChunks.push(event.data);
+      setStatus(`chunk received: ${event.data.size} bytes`);
     }
+  });
 
-    state.finalText = finalText.trim();
-    state.interimText = interimText.trim();
-    renderText();
-    setStatus(`result received${state.interimText ? ' (interim)' : ' (final)'}`);
-  };
+  recorder.start();
+  setStatus('recording... click Stop to transcribe');
+}
 
-  recognition.onerror = (event) => {
-    setStatus(`error: ${event.error || 'unknown'}`);
-  };
+async function transcribeBlob(audioBlob) {
+  const response = await fetch(WORDDROP_TRANSCRIBE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      audioData: await blobToDataUrl(audioBlob),
+      mimeType: audioBlob.type || 'audio/webm',
+      language: refs.languageSelect.value.startsWith('zh') ? 'zh' : 'en',
+      prompt: 'Transcribe the speech accurately in the original language.',
+    }),
+  });
 
-  recognition.onend = () => {
-    setStatus('recognition ended');
-  };
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
 
-  return recognition;
+  return result.data?.transcript?.trim() || '';
+}
+
+async function stopRecording() {
+  if (!state.mediaRecorder) {
+    setStatus('no active recording');
+    return;
+  }
+
+  const recorder = state.mediaRecorder;
+  setStatus('stopping recorder...');
+
+  recorder.addEventListener('stop', async () => {
+    try {
+      const audioBlob = new Blob(state.audioChunks, { type: recorder.mimeType || 'audio/webm' });
+      refs.interimOutput.value = `Recorded ${audioBlob.size} bytes`;
+      state.audioChunks = [];
+      state.mediaRecorder = null;
+      releaseAudioStream();
+
+      if (audioBlob.size === 0) {
+        throw new Error('Recorded audio is empty.');
+      }
+
+      setStatus('uploading to backend...');
+      const transcript = await transcribeBlob(audioBlob);
+      refs.finalOutput.value = transcript || '(empty transcript)';
+      refs.interimOutput.value = '';
+      setStatus('OpenAI transcription completed');
+    } catch (error) {
+      refs.finalOutput.value = '';
+      refs.interimOutput.value = '';
+      setStatus(`error: ${error.message || 'transcription failed'}`);
+    }
+  }, { once: true });
+
+  recorder.stop();
 }
 
 refs.refreshStatusButton.addEventListener('click', refreshStatus);
-
-refs.startButton.addEventListener('click', () => {
-  state.finalText = '';
-  state.interimText = '';
-  renderText();
-
-  state.recognition = buildRecognition();
-  if (!state.recognition) return;
+refs.startButton.addEventListener('click', async () => {
+  refs.finalOutput.value = '';
+  refs.interimOutput.value = '';
 
   try {
-    state.recognition.start();
+    await startRecording();
   } catch (error) {
-    setStatus(`start failed: ${error.name || 'error'}`);
+    setStatus(`error: ${error.message || 'failed to start'}`);
   }
 });
-
-refs.stopButton.addEventListener('click', stopRecognition);
+refs.stopButton.addEventListener('click', stopRecording);
 refs.languageSelect.addEventListener('change', () => {
   setStatus(`language set to ${refs.languageSelect.value}`);
 });

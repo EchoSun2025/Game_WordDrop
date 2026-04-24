@@ -16,6 +16,15 @@
 
 如果要单独排查浏览器语音输入是否正常，打开 [speech-test.html](./speech-test.html)。
 
+如果要使用 OpenAI 语音输入，先在当前目录安装依赖并启动 `WordDrop` 自带语音服务：
+
+```powershell
+npm install
+npm run server
+```
+
+语音输入会调用本地 `http://localhost:3030/api/transcribe`。
+
 ## 导入词包
 
 1. 进入游戏后点击 `导入 JSON`

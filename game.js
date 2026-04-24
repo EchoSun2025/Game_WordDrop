@@ -3,6 +3,9 @@ const STORAGE_KEYS = {
   mode: 'worddrop.mode',
 };
 
+const API_BASE_URL = 'http://localhost:3030';
+const WORDDROP_TRANSCRIBE_URL = `${API_BASE_URL}/api/transcribe`;
+
 const MODE_CONFIG = {
   image: {
     label: '图像匹配',
@@ -103,7 +106,10 @@ const state = {
   lastTranscript: 'Voice: off',
   lastInterimTranscript: '',
   isListening: false,
-  recognition: null,
+  isTranscribing: false,
+  mediaRecorder: null,
+  mediaStream: null,
+  audioChunks: [],
 };
 
 const refs = {
@@ -193,6 +199,115 @@ function setTranscript(text) {
 function setListeningState(nextState) {
   state.isListening = nextState;
   renderChallengePanel();
+}
+
+function setTranscribingState(nextState) {
+  state.isTranscribing = nextState;
+  renderChallengePanel();
+}
+
+function getSupportedAudioMimeType() {
+  const candidates = [
+    'audio/webm;codecs=opus',
+    'audio/webm',
+    'audio/mp4',
+  ];
+
+  return candidates.find((mimeType) => window.MediaRecorder?.isTypeSupported?.(mimeType)) || '';
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error('Failed to read audio blob.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function transcribeRecordedAudio(audioBlob, language = 'en', prompt = '') {
+  const audioData = await blobToDataUrl(audioBlob);
+  const response = await fetch(WORDDROP_TRANSCRIBE_URL, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      audioData,
+      mimeType: audioBlob.type || 'audio/webm',
+      language,
+      prompt,
+    }),
+  });
+
+  const result = await response.json();
+  if (!response.ok || !result.success) {
+    throw new Error(result.error || `Transcription failed (${response.status})`);
+  }
+
+  return result.data?.transcript?.trim() || '';
+}
+
+function releaseAudioStream() {
+  if (state.mediaStream) {
+    state.mediaStream.getTracks().forEach((track) => track.stop());
+    state.mediaStream = null;
+  }
+}
+
+async function startAudioCapture() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('This browser does not support microphone recording.');
+  }
+
+  const mimeType = getSupportedAudioMimeType();
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
+
+  state.audioChunks = [];
+  state.mediaStream = stream;
+  state.mediaRecorder = recorder;
+
+  recorder.addEventListener('dataavailable', (event) => {
+    if (event.data && event.data.size > 0) {
+      state.audioChunks.push(event.data);
+    }
+  });
+
+  recorder.start();
+}
+
+async function stopAudioCaptureAndTranscribe({ language = 'en', prompt = '' } = {}) {
+  const recorder = state.mediaRecorder;
+  if (!recorder) {
+    throw new Error('No active recording.');
+  }
+
+  return new Promise((resolve, reject) => {
+    recorder.addEventListener('stop', async () => {
+      try {
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(state.audioChunks, { type: mimeType });
+        state.audioChunks = [];
+        state.mediaRecorder = null;
+        releaseAudioStream();
+
+        if (audioBlob.size === 0) {
+          throw new Error('Recorded audio is empty.');
+        }
+
+        setTranscribingState(true);
+        const transcript = await transcribeRecordedAudio(audioBlob, language, prompt);
+        setTranscribingState(false);
+        resolve(transcript);
+      } catch (error) {
+        setTranscribingState(false);
+        reject(error);
+      }
+    }, { once: true });
+
+    recorder.stop();
+  });
 }
 
 function normalizeEntry(raw, index) {
@@ -434,11 +549,12 @@ function stopNextRoundTimer() {
 }
 
 function stopListening() {
-  if (state.recognition && state.isListening) {
-    state.recognition.stop();
+  if (state.mediaRecorder && state.isListening) {
+    state.mediaRecorder.stop();
   }
   state.isListening = false;
   state.lastInterimTranscript = '';
+  releaseAudioStream();
   renderChallengePanel();
 }
 
@@ -669,7 +785,7 @@ function renderSentencePanel() {
       </div>
       <div class="voice-row">
         <button class="voice-button ${state.isListening ? 'is-listening' : ''}" id="sentenceVoiceButton" type="button">
-          ${state.isListening ? '停止语音匹配' : '语音匹配'}
+          ${state.isTranscribing ? '识别中...' : state.isListening ? '停止并识别' : '开始录音匹配'}
         </button>
       </div>
     </div>
@@ -682,11 +798,11 @@ function renderBuilderPanel() {
   return `
     <div class="builder-panel">
       <p class="tiny-label">PROMPT</p>
-      <p class="builder-prompt">用 <strong>${escapeHtml(target.word)}</strong> 造一个完整句子。可以打字，也可以点击语音按钮口述。</p>
+      <p class="builder-prompt">用 <strong>${escapeHtml(target.word)}</strong> 造一个完整句子。可以打字，也可以点击录音按钮口述。</p>
       <textarea id="builderTextarea" class="builder-textarea" placeholder="Type your sentence here...">${escapeHtml(submitted)}</textarea>
       <div class="builder-actions">
         <button class="voice-button ${state.isListening ? 'is-listening' : ''}" id="builderVoiceButton" type="button">
-          ${state.isListening ? '停止录音' : '语音输入'}
+          ${state.isTranscribing ? '识别中...' : state.isListening ? '停止并识别' : '开始录音'}
         </button>
         <button class="builder-submit" id="builderSubmitButton" type="button">提交句子</button>
       </div>
@@ -847,133 +963,67 @@ function setMode(mode) {
   setFeedback('模式已切换', MODE_CONFIG[mode].intro, state.pack.words[0]);
 }
 
-function toggleRecognition(purpose) {
-  if (!state.recognition) {
-    setTranscript('Voice: browser not supported');
+async function toggleRecognition(purpose) {
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    setTranscript('Voice: browser recording not supported');
     return;
   }
 
   if (state.isListening) {
-    stopListening();
+    try {
+      setTranscript('Voice: uploading audio...');
+      const prompt =
+        purpose === 'sentence'
+          ? 'Transcribe the spoken English sentence accurately.'
+          : 'Transcribe the spoken English sentence accurately.';
+      const transcript = await stopAudioCaptureAndTranscribe({ language: 'en', prompt });
+      setListeningState(false);
+      setTranscript(`Voice final: ${transcript || 'no speech captured'}`);
+
+      if (purpose === 'sentence' && state.mode === 'sentence' && state.currentRound && transcript) {
+        let bestIndex = 0;
+        let bestScore = -1;
+        state.currentRound.options.forEach((option, index) => {
+          const score = scoreSentenceMatch(transcript, option.fullSentence);
+          if (score > bestScore) {
+            bestScore = score;
+            bestIndex = index;
+          }
+        });
+        handleSentenceChoice(bestIndex, transcript);
+      }
+
+      if (purpose === 'builder' && state.mode === 'builder') {
+        const textarea = document.getElementById('builderTextarea');
+        if (textarea) {
+          textarea.value = transcript;
+        }
+      }
+    } catch (error) {
+      setListeningState(false);
+      setTranscript(`Voice error: ${error.message || 'failed to transcribe'}`);
+    }
     return;
   }
 
-  state.recognition._purpose = purpose;
-  state.lastInterimTranscript = '';
-  setTranscript('Voice: listening...');
-  setListeningState(true);
-
   try {
-    state.recognition.start();
+    await startAudioCapture();
+    state.lastInterimTranscript = '';
+    setTranscript('Voice: recording... click again to stop');
+    setListeningState(true);
   } catch (error) {
     setListeningState(false);
-    setTranscript(`Voice: start failed (${error.name || 'error'})`);
+    setTranscript(`Voice error: ${error.message || error.name || 'failed to start recording'}`);
   }
 }
 
 function setupRecognition() {
-  const RecognitionClass = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!RecognitionClass) {
-    setTranscript('Voice: browser not supported');
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    setTranscript('Voice: browser recording not supported');
     return;
   }
 
-  const recognition = new RecognitionClass();
-  recognition.lang = 'en-US';
-  recognition.continuous = false;
-  recognition.interimResults = true;
-  recognition.maxAlternatives = 3;
-
-  recognition.onstart = () => {
-    setListeningState(true);
-    setTranscript('Voice: listening started');
-  };
-
-  recognition.onaudiostart = () => {
-    setTranscript('Voice: microphone connected');
-  };
-
-  recognition.onsoundstart = () => {
-    setTranscript('Voice: sound detected');
-  };
-
-  recognition.onspeechstart = () => {
-    setTranscript('Voice: speech detected');
-  };
-
-  recognition.onresult = (event) => {
-    let finalTranscript = '';
-    let interimTranscript = '';
-
-    for (let index = event.resultIndex; index < event.results.length; index += 1) {
-      const result = event.results[index];
-      const text = result[0]?.transcript || '';
-      if (result.isFinal) {
-        finalTranscript += text;
-      } else {
-        interimTranscript += text;
-      }
-    }
-
-    const normalizedFinal = finalTranscript.trim();
-    const normalizedInterim = interimTranscript.trim();
-    state.lastInterimTranscript = normalizedInterim;
-
-    if (normalizedFinal) {
-      setTranscript(`Voice final: ${normalizedFinal}`);
-    } else if (normalizedInterim) {
-      setTranscript(`Voice interim: ${normalizedInterim}`);
-    } else {
-      setTranscript('Voice: no speech captured');
-    }
-
-    if (!state.currentRound) return;
-
-    if (recognition._purpose === 'sentence' && state.mode === 'sentence' && normalizedFinal) {
-      let bestIndex = 0;
-      let bestScore = -1;
-      state.currentRound.options.forEach((option, index) => {
-        const score = scoreSentenceMatch(normalizedFinal, option.fullSentence);
-        if (score > bestScore) {
-          bestScore = score;
-          bestIndex = index;
-        }
-      });
-      handleSentenceChoice(bestIndex, normalizedFinal);
-    }
-
-    if (recognition._purpose === 'builder' && state.mode === 'builder') {
-      const textarea = document.getElementById('builderTextarea');
-      if (textarea) {
-        textarea.value = normalizedFinal || normalizedInterim;
-      }
-    }
-  };
-
-  recognition.onnomatch = () => {
-    setTranscript('Voice: no match');
-  };
-
-  recognition.onspeechend = () => {
-    if (state.lastInterimTranscript) {
-      setTranscript(`Voice waiting final: ${state.lastInterimTranscript}`);
-    }
-  };
-
-  recognition.onend = () => {
-    state.isListening = false;
-    state.lastInterimTranscript = '';
-    renderChallengePanel();
-  };
-
-  recognition.onerror = (event) => {
-    state.isListening = false;
-    state.lastInterimTranscript = '';
-    setTranscript(`Voice error: ${event.error || 'unknown'}`);
-    renderChallengePanel();
-  };
-
-  state.recognition = recognition;
+  setTranscript('Voice: OpenAI recording mode ready');
 }
 
 function handleImport(event) {

@@ -1,0 +1,13 @@
+{
+  "name": "worddrop",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "server": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^17.2.3",
+    "openai": "^6.27.0"
+  }
+}
