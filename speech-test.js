@@ -50,8 +50,12 @@ function blobToDataUrl(blob) {
 
 async function checkBackend() {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/test`);
-    return response.ok ? 'reachable' : `http ${response.status}`;
+    const response = await fetch(`${API_BASE_URL}/health`);
+    if (!response.ok) return `http ${response.status}`;
+    const result = await response.json();
+    return result?.status === 'ok'
+      ? `reachable on ${result.port}`
+      : 'unhealthy';
   } catch {
     return 'unreachable';
   }
@@ -110,7 +114,7 @@ async function startRecording() {
   recorder.addEventListener('dataavailable', (event) => {
     if (event.data && event.data.size > 0) {
       state.audioChunks.push(event.data);
-      setStatus(`chunk received: ${event.data.size} bytes`);
+      setStatus(`recorded audio chunk: ${event.data.size} bytes`);
     }
   });
 
@@ -119,6 +123,7 @@ async function startRecording() {
 }
 
 async function transcribeBlob(audioBlob) {
+  setStatus(`uploading ${audioBlob.size} bytes to backend...`);
   const response = await fetch(WORDDROP_TRANSCRIBE_URL, {
     method: 'POST',
     headers: {
@@ -147,7 +152,7 @@ async function stopRecording() {
   }
 
   const recorder = state.mediaRecorder;
-  setStatus('stopping recorder...');
+  setStatus('stopping recorder and preparing upload...');
 
   recorder.addEventListener('stop', async () => {
     try {
@@ -161,7 +166,6 @@ async function stopRecording() {
         throw new Error('Recorded audio is empty.');
       }
 
-      setStatus('uploading to backend...');
       const transcript = await transcribeBlob(audioBlob);
       refs.finalOutput.value = transcript || '(empty transcript)';
       refs.interimOutput.value = '';
@@ -169,7 +173,12 @@ async function stopRecording() {
     } catch (error) {
       refs.finalOutput.value = '';
       refs.interimOutput.value = '';
-      setStatus(`error: ${error.message || 'transcription failed'}`);
+      const message = error.message || 'transcription failed';
+      setStatus(
+        message === 'Failed to fetch'
+          ? 'error: Failed to fetch. The local WordDrop speech server is not reachable on http://localhost:3030.'
+          : `error: ${message}`,
+      );
     }
   }, { once: true });
 

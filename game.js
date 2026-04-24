@@ -227,18 +227,26 @@ function blobToDataUrl(blob) {
 
 async function transcribeRecordedAudio(audioBlob, language = 'en', prompt = '') {
   const audioData = await blobToDataUrl(audioBlob);
-  const response = await fetch(WORDDROP_TRANSCRIBE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      audioData,
-      mimeType: audioBlob.type || 'audio/webm',
-      language,
-      prompt,
-    }),
-  });
+  let response;
+  try {
+    response = await fetch(WORDDROP_TRANSCRIBE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        audioData,
+        mimeType: audioBlob.type || 'audio/webm',
+        language,
+        prompt,
+      }),
+    });
+  } catch (error) {
+    if (error.message === 'Failed to fetch') {
+      throw new Error('WordDrop speech server is not reachable on http://localhost:3030.');
+    }
+    throw error;
+  }
 
   const result = await response.json();
   if (!response.ok || !result.success) {

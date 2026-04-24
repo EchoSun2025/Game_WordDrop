@@ -1,5 +1,7 @@
 # WordDrop
 
+Speech note: the standalone speech server uses `WORDDROP_PORT` and defaults to `3030`; it does not reuse the parent LexiLand `PORT=3000`.
+
 独立词汇小游戏原型仓库。
 
 这是按 `TMP/20260424request.txt` 先落的最小原型，目前只实现第 1 个玩法：

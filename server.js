@@ -14,7 +14,7 @@ if (fs.existsSync(localEnvPath)) {
   dotenv.config({ path: parentEnvPath });
 }
 
-const port = Number(process.env.PORT) || 3030;
+const port = Number(process.env.WORDDROP_PORT) || 3030;
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -91,6 +91,15 @@ const server = http.createServer(async (request, response) => {
       port,
       hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY),
       model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe',
+    });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/test') {
+    sendJson(response, 200, {
+      success: true,
+      message: 'WordDrop speech server is reachable.',
+      port,
     });
     return;
   }
