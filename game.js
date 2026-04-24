@@ -101,6 +101,7 @@ const state = {
   nextRoundTimer: null,
   waitingNextRound: false,
   lastTranscript: 'Voice: off',
+  lastInterimTranscript: '',
   isListening: false,
   recognition: null,
 };
@@ -187,6 +188,11 @@ function speakWord(word) {
 function setTranscript(text) {
   state.lastTranscript = text;
   refs.feedbackTranscript.textContent = text;
+}
+
+function setListeningState(nextState) {
+  state.isListening = nextState;
+  renderChallengePanel();
 }
 
 function normalizeEntry(raw, index) {
@@ -432,6 +438,7 @@ function stopListening() {
     state.recognition.stop();
   }
   state.isListening = false;
+  state.lastInterimTranscript = '';
   renderChallengePanel();
 }
 
@@ -852,10 +859,16 @@ function toggleRecognition(purpose) {
   }
 
   state.recognition._purpose = purpose;
-  state.isListening = true;
+  state.lastInterimTranscript = '';
   setTranscript('Voice: listening...');
-  renderChallengePanel();
-  state.recognition.start();
+  setListeningState(true);
+
+  try {
+    state.recognition.start();
+  } catch (error) {
+    setListeningState(false);
+    setTranscript(`Voice: start failed (${error.name || 'error'})`);
+  }
 }
 
 function setupRecognition() {
@@ -868,46 +881,95 @@ function setupRecognition() {
   const recognition = new RecognitionClass();
   recognition.lang = 'en-US';
   recognition.continuous = false;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
+  recognition.maxAlternatives = 3;
+
+  recognition.onstart = () => {
+    setListeningState(true);
+    setTranscript('Voice: listening started');
+  };
+
+  recognition.onaudiostart = () => {
+    setTranscript('Voice: microphone connected');
+  };
+
+  recognition.onsoundstart = () => {
+    setTranscript('Voice: sound detected');
+  };
+
+  recognition.onspeechstart = () => {
+    setTranscript('Voice: speech detected');
+  };
 
   recognition.onresult = (event) => {
-    const transcript = Array.from(event.results)
-      .map((result) => result[0]?.transcript || '')
-      .join(' ')
-      .trim();
-    setTranscript(`Voice: ${transcript || 'no speech captured'}`);
+    let finalTranscript = '';
+    let interimTranscript = '';
+
+    for (let index = event.resultIndex; index < event.results.length; index += 1) {
+      const result = event.results[index];
+      const text = result[0]?.transcript || '';
+      if (result.isFinal) {
+        finalTranscript += text;
+      } else {
+        interimTranscript += text;
+      }
+    }
+
+    const normalizedFinal = finalTranscript.trim();
+    const normalizedInterim = interimTranscript.trim();
+    state.lastInterimTranscript = normalizedInterim;
+
+    if (normalizedFinal) {
+      setTranscript(`Voice final: ${normalizedFinal}`);
+    } else if (normalizedInterim) {
+      setTranscript(`Voice interim: ${normalizedInterim}`);
+    } else {
+      setTranscript('Voice: no speech captured');
+    }
 
     if (!state.currentRound) return;
 
-    if (recognition._purpose === 'sentence' && state.mode === 'sentence') {
+    if (recognition._purpose === 'sentence' && state.mode === 'sentence' && normalizedFinal) {
       let bestIndex = 0;
       let bestScore = -1;
       state.currentRound.options.forEach((option, index) => {
-        const score = scoreSentenceMatch(transcript, option.fullSentence);
+        const score = scoreSentenceMatch(normalizedFinal, option.fullSentence);
         if (score > bestScore) {
           bestScore = score;
           bestIndex = index;
         }
       });
-      handleSentenceChoice(bestIndex, transcript);
+      handleSentenceChoice(bestIndex, normalizedFinal);
     }
 
     if (recognition._purpose === 'builder' && state.mode === 'builder') {
       const textarea = document.getElementById('builderTextarea');
       if (textarea) {
-        textarea.value = transcript;
+        textarea.value = normalizedFinal || normalizedInterim;
       }
+    }
+  };
+
+  recognition.onnomatch = () => {
+    setTranscript('Voice: no match');
+  };
+
+  recognition.onspeechend = () => {
+    if (state.lastInterimTranscript) {
+      setTranscript(`Voice waiting final: ${state.lastInterimTranscript}`);
     }
   };
 
   recognition.onend = () => {
     state.isListening = false;
+    state.lastInterimTranscript = '';
     renderChallengePanel();
   };
 
-  recognition.onerror = () => {
+  recognition.onerror = (event) => {
     state.isListening = false;
-    setTranscript('Voice: recognition error');
+    state.lastInterimTranscript = '';
+    setTranscript(`Voice error: ${event.error || 'unknown'}`);
     renderChallengePanel();
   };
 

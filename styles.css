@@ -200,6 +200,11 @@ label {
   font-weight: 700;
 }
 
+.link-button {
+  color: var(--line);
+  text-decoration: none;
+}
+
 .secondary-button {
   background: linear-gradient(135deg, rgba(244, 162, 93, 0.18), rgba(255, 245, 230, 0.92));
 }

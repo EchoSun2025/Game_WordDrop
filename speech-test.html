@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>WordDrop Speech Test</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <style>
+      .speech-test-shell {
+        width: min(100%, 760px);
+        margin: 0 auto;
+        display: grid;
+        gap: 12px;
+      }
+      .speech-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+      .speech-panel {
+        padding: 14px;
+        border: 1.5px solid rgba(46, 38, 29, 0.18);
+        border-radius: 22px;
+        background: rgba(255, 253, 248, 0.96);
+      }
+      .speech-panel h2,
+      .speech-panel h3,
+      .speech-panel p {
+        margin: 0;
+      }
+      .speech-panel h2 {
+        margin-top: 6px;
+      }
+      .speech-panel h3 {
+        margin-bottom: 8px;
+        font-size: 1rem;
+      }
+      .speech-copy {
+        color: var(--ink-soft);
+      }
+      .speech-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+        margin-top: 12px;
+      }
+      .speech-select,
+      .speech-textarea,
+      .speech-output {
+        width: 100%;
+        padding: 12px;
+        border: 1.5px solid rgba(46, 38, 29, 0.18);
+        border-radius: 16px;
+        background: white;
+        color: var(--line);
+      }
+      .speech-textarea,
+      .speech-output {
+        min-height: 120px;
+        resize: vertical;
+      }
+      .speech-output {
+        white-space: pre-wrap;
+      }
+      .status-list {
+        display: grid;
+        gap: 8px;
+      }
+      .status-item {
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 12px;
+        border-radius: 14px;
+        background: rgba(46, 38, 29, 0.05);
+      }
+      .status-item span:last-child {
+        text-align: right;
+        color: var(--ink-soft);
+      }
+      .event-log {
+        max-height: 320px;
+        overflow: auto;
+        font-family: "Courier New", monospace;
+        font-size: 0.83rem;
+      }
+      @media (max-width: 720px) {
+        .speech-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="speech-test-shell">
+        <section class="intro-panel">
+          <p class="eyebrow">WORDDROP / SPEECH INPUT TEST</p>
+          <h1>语音输入测试</h1>
+          <p class="intro-copy">这个页面只测一件事：浏览器能不能把你的麦克风声音转成文本，并把中间状态和错误完整显示出来。</p>
+        </section>
+
+        <section class="speech-panel">
+          <p class="tiny-label">CHECKLIST</p>
+          <h2>先看这 4 项</h2>
+          <p class="speech-copy">如果这里已经显示 `not supported` 或 `file:`，那游戏里语音输入大概率也不会稳定。</p>
+          <div class="status-list" id="statusList"></div>
+          <div class="speech-actions">
+            <a class="ghost-button link-button" href="./index.html">返回 WordDrop</a>
+            <button class="secondary-button" id="refreshStatusButton" type="button">刷新状态</button>
+          </div>
+        </section>
+
+        <section class="speech-grid">
+          <section class="speech-panel">
+            <p class="tiny-label">RECOGNITION</p>
+            <h3>实时转写</h3>
+            <div class="speech-actions">
+              <select id="languageSelect" class="speech-select">
+                <option value="en-US">English (en-US)</option>
+                <option value="en-GB">English (en-GB)</option>
+                <option value="zh-CN">中文 (zh-CN)</option>
+                <option value="zh-TW">中文 (zh-TW)</option>
+              </select>
+              <button class="voice-button" id="startRecognitionButton" type="button">开始测试</button>
+              <button class="ghost-button" id="stopRecognitionButton" type="button">停止</button>
+            </div>
+            <p class="speech-copy" id="recognitionStatus">Status: idle</p>
+            <div class="speech-actions">
+              <textarea id="interimOutput" class="speech-textarea" placeholder="Interim transcript..."></textarea>
+              <textarea id="finalOutput" class="speech-textarea" placeholder="Final transcript..."></textarea>
+            </div>
+          </section>
+
+          <section class="speech-panel">
+            <p class="tiny-label">EVENT LOG</p>
+            <h3>浏览器事件</h3>
+            <div id="eventLog" class="speech-output event-log"></div>
+          </section>
+        </section>
+      </section>
+    </main>
+
+    <script src="./speech-test.js"></script>
+  </body>
+</html>

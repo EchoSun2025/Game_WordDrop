@@ -14,6 +14,8 @@
 
 直接双击打开 [index.html](./index.html) 即可。
 
+如果要单独排查浏览器语音输入是否正常，打开 [speech-test.html](./speech-test.html)。
+
 ## 导入词包
 
 1. 进入游戏后点击 `导入 JSON`
