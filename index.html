@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>LexiLand Word Game Minimal</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="intro-panel">
+        <p class="eyebrow">LEXILAND / WORD GAME / MINIMAL V1</p>
+        <h1>下落单词选图</h1>
+        <p class="intro-copy">
+          最小版只保留核心循环：单词下落、3 个图片篮子、点击命中得分、语音朗读和基础反馈。
+        </p>
+      </section>
+
+      <section class="phone-frame">
+        <header class="topbar">
+          <div class="stat-chip">
+            <span class="stat-label">Score</span>
+            <strong id="scoreValue">0</strong>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Energy</span>
+            <strong id="energyValue">0</strong>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Learned</span>
+            <strong id="learnedValue">0</strong>
+          </div>
+          <div class="stat-chip">
+            <span class="stat-label">Hit Rate</span>
+            <strong id="accuracyValue">0%</strong>
+          </div>
+        </header>
+
+        <section class="playfield">
+          <div class="playfield-header">
+            <div>
+              <p class="tiny-label">ROUND</p>
+              <strong id="roundValue">1 / 6</strong>
+            </div>
+            <div class="level-block">
+              <p class="tiny-label">LEVEL</p>
+              <strong id="levelValue">LV1</strong>
+            </div>
+          </div>
+
+          <div class="fall-lane">
+            <div class="fall-track"></div>
+            <div id="fallingWord" class="falling-word">APPLE</div>
+            <div class="danger-line"></div>
+          </div>
+
+          <div class="timer-block">
+            <div class="timer-rail">
+              <div id="timerFill" class="timer-fill"></div>
+            </div>
+            <span id="timerText">4.5s</span>
+          </div>
+        </section>
+
+        <section id="basketGrid" class="basket-grid" aria-label="图片篮子"></section>
+
+        <section class="feedback-panel">
+          <div class="feedback-copy">
+            <p class="tiny-label">FEEDBACK</p>
+            <h2 id="feedbackTitle">准备开始</h2>
+            <p id="feedbackText">点任意篮子开始第一轮。</p>
+            <div class="feedback-meta">
+              <span id="feedbackWord">Word: --</span>
+              <span id="feedbackPos">POS: --</span>
+            </div>
+          </div>
+          <div class="feedback-preview">
+            <img id="feedbackImage" src="./assets/apple.jpg" alt="当前反馈图片" />
+          </div>
+        </section>
+
+        <footer class="controls">
+          <button id="startButton" class="primary-button" type="button">开始 / 重新开始</button>
+          <p class="hint-text">支持鼠标点击，也支持键盘 `1 / 2 / 3` 选篮子。</p>
+        </footer>
+      </section>
+    </main>
+
+    <script src="./game.js"></script>
+  </body>
+</html>
