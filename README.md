@@ -14,13 +14,39 @@
 
 直接双击打开 [index.html](./index.html) 即可。
 
+## 导入词包
+
+1. 进入游戏后点击 `导入 JSON`
+2. 选择一个符合 `WordDrop` 结构的词包
+3. 导入后点 `开始 / 重新开始`
+
+支持的最小字段：
+
+```json
+{
+  "name": "My Pack",
+  "words": [
+    {
+      "word": "apple",
+      "baseForm": "apple",
+      "zh": "苹果",
+      "pos": "noun",
+      "definition": "a kind of fruit",
+      "example": "I eat an apple every day.",
+      "context": "She polished the apple before dinner.",
+      "image": "./data/images/apple.jpg",
+      "wordForms": ["apples"]
+    }
+  ]
+}
+```
+
 ## 当前故意没做
 
-- 语音识别
-- 句子匹配
-- 造句判断
 - 接入真实 word card / 数据库
 - 音效、震动、长期统计
+- 真正的语义级造句判定
+- 句子全文中文翻译生成
 
 ## 独立化方向
 
@@ -32,23 +58,22 @@
 2. WordDrop 读取 JSON
 3. WordDrop 根据词、图片、词性、例句生成当日关卡
 
-建议的最小字段：
-
-```json
-[
-  {
-    "word": "apple",
-    "pos": "noun",
-    "zh": "苹果",
-    "image": "https://... or local-path",
-    "context": "I eat an apple every day."
-  }
-]
-```
-
 ## 下一步建议
 
 1. 把 `WORD_BANK` 换成现有词卡数据源。
 2. 给每个词加 `context` 和 `audio` 字段。
 3. 新增 JSON 导入入口，直接吃 LexiLand 的“今日生词”导出。
 4. 再拆出第 2 模式和第 3 模式。
+
+## 生成 2026 年 4 月测试词包
+
+仓库里提供了一个打包脚本，会从 LexiLand 固定备份目录读取 2026 年 4 月且带图片的单词，并生成可直接导入 WordDrop 的 JSON：
+
+```powershell
+node .\scripts\generate-lexiland-pack.js
+```
+
+输出位置：
+
+- `data/lexiland-april-2026-image-words.json`
+- `data/lexiland-april-2026-images/`
