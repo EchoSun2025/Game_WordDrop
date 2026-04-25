@@ -47,8 +47,8 @@ label {
 }
 
 .intro-panel {
-  max-width: 540px;
-  margin: 0 auto 18px;
+  max-width: 460px;
+  margin: 0 auto 8px;
   text-align: center;
 }
 
@@ -81,10 +81,18 @@ label {
   font-size: 1rem;
 }
 
+.eyebrow,
+.intro-copy,
+.topbar,
+.hint-text,
+.data-copy {
+  display: none;
+}
+
 .phone-frame {
   width: min(100%, 460px);
   margin: 0 auto;
-  padding: 16px;
+  padding: 12px;
   border: 2px solid rgba(46, 38, 29, 0.16);
   border-radius: 32px;
   background: var(--panel);
@@ -164,28 +172,16 @@ label {
 }
 
 .data-panel {
-  display: grid;
-  grid-template-columns: 1.2fr auto;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 20px;
-  margin-bottom: 12px;
-}
-
-.data-copy strong {
-  display: block;
-  margin: 4px 0 6px;
-}
-
-.data-copy p:last-child {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 0.84rem;
+  padding: 8px;
+  border-radius: 18px;
+  margin-bottom: 10px;
 }
 
 .data-actions {
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: wrap;
   align-items: stretch;
+  justify-content: center;
 }
 
 .secondary-button,
@@ -229,6 +225,29 @@ label {
 .mode-block,
 .level-block {
   text-align: right;
+}
+
+.level-block,
+.feedback-meta span:last-child {
+  display: none;
+}
+
+.pause-button {
+  grid-column: 1 / -1;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #d44f3d, #b93e2f);
+  color: white;
+  font-weight: 800;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.pause-button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .fall-lane {
@@ -520,13 +539,7 @@ label {
 .controls {
   flex-direction: column;
   align-items: stretch;
-  margin-top: 14px;
-}
-
-.control-actions {
-  display: flex;
-  gap: 10px;
-  align-items: stretch;
+  margin-top: 12px;
 }
 
 .primary-button {
@@ -539,15 +552,6 @@ label {
   font-size: 1rem;
   font-weight: 800;
   cursor: pointer;
-}
-
-.control-actions .primary-button {
-  flex: 1 1 auto;
-}
-
-.control-actions .ghost-button {
-  flex: 0 0 auto;
-  min-width: 92px;
 }
 
 .hint-text {

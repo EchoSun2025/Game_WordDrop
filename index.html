@@ -9,15 +9,11 @@
   <body>
     <main class="app-shell">
       <section class="intro-panel">
-        <p class="eyebrow">WORDDROP / STANDALONE VOCAB GAME</p>
         <h1>WordDrop</h1>
-        <p class="intro-copy">
-          脱离 LexiLand 也能玩。导入当日生词 JSON 后，就能切换图像匹配、句子匹配和限时造句 3 个玩法。
-        </p>
       </section>
 
       <section class="phone-frame">
-        <header class="topbar">
+        <header class="topbar" aria-hidden="true">
           <div class="stat-chip">
             <span class="stat-label">Score</span>
             <strong id="scoreValue">0</strong>
@@ -43,7 +39,7 @@
         </section>
 
         <section class="data-panel">
-          <div class="data-copy">
+          <div class="data-copy" aria-hidden="true">
             <p class="tiny-label">DATA PACK</p>
             <strong id="packName">Starter Pack</strong>
             <p id="packMeta">6 words loaded.</p>
@@ -52,8 +48,8 @@
           <div class="data-actions">
             <label class="secondary-button" for="importFile">导入 JSON</label>
             <input id="importFile" type="file" accept=".json,application/json" hidden />
-            <a class="ghost-button link-button" href="./speech-test.html">语音输入测试</a>
-            <button id="resetPackButton" class="ghost-button" type="button">恢复内置包</button>
+            <a class="ghost-button link-button" href="./speech-test.html">语音测试</a>
+            <button id="resetPackButton" class="ghost-button" type="button">恢复内置</button>
           </div>
         </section>
 
@@ -71,6 +67,7 @@
               <p class="tiny-label">LEVEL</p>
               <strong id="levelValue">LV1</strong>
             </div>
+            <button id="pauseButton" class="pause-button" type="button" disabled>Pause</button>
           </div>
 
           <div class="fall-lane">
@@ -91,9 +88,8 @@
 
         <section class="feedback-panel">
           <div class="feedback-copy">
-            <p class="tiny-label">FEEDBACK</p>
             <h2 id="feedbackTitle">准备开始</h2>
-            <p id="feedbackText">先选择模式，然后点开始。</p>
+            <p id="feedbackText">选择模式后点击开始。</p>
             <p id="feedbackTranscript" class="feedback-transcript">Voice: off</p>
             <div class="feedback-meta">
               <span id="feedbackWord">Word: --</span>
@@ -106,13 +102,8 @@
         </section>
 
         <footer class="controls">
-          <div class="control-actions">
           <button id="startButton" class="primary-button" type="button">开始 / 重新开始</button>
-            <button id="pauseButton" class="ghost-button" type="button" disabled>Pause</button>
-          </div>
-          <p class="hint-text" id="hintText">
-            图像匹配和句子匹配支持键盘 `1 / 2 / 3`。语音输入现在走 OpenAI 转写，需要先启动 `WordDrop` 自带的本地语音服务 `http://localhost:3030`。
-          </p>
+          <p class="hint-text" id="hintText"></p>
         </footer>
       </section>
     </main>
