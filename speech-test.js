@@ -1,5 +1,6 @@
-const API_BASE_URL = 'http://localhost:3030';
-const WORDDROP_TRANSCRIBE_URL = `${API_BASE_URL}/api/transcribe`;
+const API_BASE_URL = window.location.origin.startsWith('http')
+  ? window.location.origin
+  : 'http://localhost:3030';
 
 const refs = {
   statusList: document.getElementById('statusList'),
@@ -14,9 +15,8 @@ const refs = {
 };
 
 const state = {
-  mediaRecorder: null,
-  mediaStream: null,
-  audioChunks: [],
+  transcriber: null,
+  finalTranscripts: [],
 };
 
 function appendLog(message) {
@@ -29,32 +29,13 @@ function setStatus(text) {
   appendLog(text);
 }
 
-function getSupportedAudioMimeType() {
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/mp4',
-  ];
-
-  return candidates.find((mimeType) => window.MediaRecorder?.isTypeSupported?.(mimeType)) || '';
-}
-
-function blobToDataUrl(blob) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(String(reader.result || ''));
-    reader.onerror = () => reject(new Error('Failed to read recorded audio.'));
-    reader.readAsDataURL(blob);
-  });
-}
-
 async function checkBackend() {
   try {
     const response = await fetch(`${API_BASE_URL}/health`);
     if (!response.ok) return `http ${response.status}`;
     const result = await response.json();
     return result?.status === 'ok'
-      ? `reachable on ${result.port}`
+      ? `reachable on ${result.port} (${result.realtimeModel || result.model})`
       : 'unhealthy';
   } catch {
     return 'unreachable';
@@ -75,7 +56,7 @@ async function refreshStatus() {
   const permission = await getPermissionState();
   const backend = await checkBackend();
   const items = [
-    ['MediaRecorder', window.MediaRecorder ? 'supported' : 'not supported'],
+    ['WebRTC', window.RTCPeerConnection ? 'supported' : 'not supported'],
     ['Protocol', window.location.protocol || 'unknown'],
     ['Secure Context', window.isSecureContext ? 'yes' : 'no'],
     ['Mic Permission', permission],
@@ -91,112 +72,73 @@ async function refreshStatus() {
   `).join('');
 }
 
-function releaseAudioStream() {
-  if (state.mediaStream) {
-    state.mediaStream.getTracks().forEach((track) => track.stop());
-    state.mediaStream = null;
-  }
-}
-
-async function startRecording() {
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    throw new Error('Browser recording is not supported.');
-  }
-
-  const mimeType = getSupportedAudioMimeType();
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-
-  state.audioChunks = [];
-  state.mediaStream = stream;
-  state.mediaRecorder = recorder;
-
-  recorder.addEventListener('dataavailable', (event) => {
-    if (event.data && event.data.size > 0) {
-      state.audioChunks.push(event.data);
-      setStatus(`recorded audio chunk: ${event.data.size} bytes`);
-    }
-  });
-
-  recorder.start();
-  setStatus('recording... click Stop to transcribe');
-}
-
-async function transcribeBlob(audioBlob) {
-  setStatus(`uploading ${audioBlob.size} bytes to backend...`);
-  const response = await fetch(WORDDROP_TRANSCRIBE_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
+function buildTranscriber() {
+  return new window.WordDropRealtimeTranscriber({
+    apiBaseUrl: API_BASE_URL,
+    language: refs.languageSelect.value,
+    prompt: 'Transcribe the speech accurately in the original language.',
+    onStatus: setStatus,
+    onEvent: appendLog,
+    onInterim: (text) => {
+      refs.interimOutput.value = text;
     },
-    body: JSON.stringify({
-      audioData: await blobToDataUrl(audioBlob),
-      mimeType: audioBlob.type || 'audio/webm',
-      language: refs.languageSelect.value.startsWith('zh') ? 'zh' : 'en',
-      prompt: 'Transcribe the speech accurately in the original language.',
-    }),
+    onFinal: (text) => {
+      if (text) {
+        state.finalTranscripts.push(text);
+      }
+      refs.interimOutput.value = '';
+      refs.finalOutput.value = state.finalTranscripts.join('\n');
+      setStatus(text ? 'realtime transcription turn completed' : 'no speech captured');
+    },
+    onError: (error) => {
+      setStatus(`error: ${error.message || 'realtime transcription failed'}`);
+    },
   });
-
-  const result = await response.json();
-  if (!response.ok || !result.success) {
-    throw new Error(result.error || `HTTP ${response.status}`);
-  }
-
-  return result.data?.transcript?.trim() || '';
 }
 
-async function stopRecording() {
-  if (!state.mediaRecorder) {
-    setStatus('no active recording');
+async function startRealtimeTest() {
+  if (!window.WordDropRealtimeTranscriber?.isSupported()) {
+    setStatus('error: realtime WebRTC transcription is not supported in this browser');
     return;
   }
 
-  const recorder = state.mediaRecorder;
-  setStatus('stopping recorder and preparing upload...');
+  if (state.transcriber?.isActive || state.transcriber?.isStarting) {
+    setStatus('realtime transcription is already running');
+    return;
+  }
 
-  recorder.addEventListener('stop', async () => {
-    try {
-      const audioBlob = new Blob(state.audioChunks, { type: recorder.mimeType || 'audio/webm' });
-      refs.interimOutput.value = `Recorded ${audioBlob.size} bytes`;
-      state.audioChunks = [];
-      state.mediaRecorder = null;
-      releaseAudioStream();
+  refs.interimOutput.value = '';
+  refs.finalOutput.value = '';
+  state.finalTranscripts = [];
+  state.transcriber = buildTranscriber();
 
-      if (audioBlob.size === 0) {
-        throw new Error('Recorded audio is empty.');
-      }
+  try {
+    await state.transcriber.start({
+      language: refs.languageSelect.value,
+      prompt: 'Transcribe the speech accurately in the original language.',
+    });
+  } catch (error) {
+    state.transcriber = null;
+    setStatus(`error: ${error.message || 'failed to start realtime transcription'}`);
+  }
+}
 
-      const transcript = await transcribeBlob(audioBlob);
-      refs.finalOutput.value = transcript || '(empty transcript)';
-      refs.interimOutput.value = '';
-      setStatus('OpenAI transcription completed');
-    } catch (error) {
-      refs.finalOutput.value = '';
-      refs.interimOutput.value = '';
-      const message = error.message || 'transcription failed';
-      setStatus(
-        message === 'Failed to fetch'
-          ? 'error: Failed to fetch. The local WordDrop speech server is not reachable on http://localhost:3030.'
-          : `error: ${message}`,
-      );
-    }
-  }, { once: true });
+async function stopRealtimeTest() {
+  if (!state.transcriber) {
+    setStatus('no active realtime transcription session');
+    return;
+  }
 
-  recorder.stop();
+  try {
+    await state.transcriber.stop();
+  } finally {
+    state.transcriber = null;
+  }
 }
 
 refs.refreshStatusButton.addEventListener('click', refreshStatus);
-refs.startButton.addEventListener('click', async () => {
-  refs.finalOutput.value = '';
-  refs.interimOutput.value = '';
-
-  try {
-    await startRecording();
-  } catch (error) {
-    setStatus(`error: ${error.message || 'failed to start'}`);
-  }
-});
-refs.stopButton.addEventListener('click', stopRecording);
+refs.startButton.addEventListener('click', startRealtimeTest);
+refs.stopButton.addEventListener('click', stopRealtimeTest);
 refs.languageSelect.addEventListener('change', () => {
   setStatus(`language set to ${refs.languageSelect.value}`);
 });

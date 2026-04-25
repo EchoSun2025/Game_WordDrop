@@ -18,6 +18,10 @@ const port = Number(process.env.WORDDROP_PORT) || 3030;
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
+const realtimeTranscribeModel =
+  process.env.OPENAI_REALTIME_TRANSCRIBE_MODEL
+  || process.env.OPENAI_TRANSCRIBE_MODEL
+  || 'gpt-4o-mini-transcribe';
 
 function setCorsHeaders(response) {
   response.setHeader('Access-Control-Allow-Origin', '*');
@@ -129,6 +133,7 @@ const server = http.createServer(async (request, response) => {
       port,
       hasOpenAIKey: Boolean(process.env.OPENAI_API_KEY),
       model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-4o-mini-transcribe',
+      realtimeModel: realtimeTranscribeModel,
     });
     return;
   }
@@ -140,6 +145,90 @@ const server = http.createServer(async (request, response) => {
       port,
     });
     return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/realtime/transcription-session') {
+    if (!process.env.OPENAI_API_KEY) {
+      sendJson(response, 500, {
+        success: false,
+        error: 'OPENAI_API_KEY is not configured.',
+      });
+      return;
+    }
+
+    try {
+      const rawBody = await readRequestBody(request);
+      const body = JSON.parse(rawBody || '{}');
+      const {
+        sdp,
+        language = 'en',
+        prompt = '',
+        model = realtimeTranscribeModel,
+      } = body;
+
+      if (!sdp || typeof sdp !== 'string') {
+        sendJson(response, 400, {
+          success: false,
+          error: 'sdp is required.',
+        });
+        return;
+      }
+
+      const sessionConfig = {
+        type: 'transcription',
+        audio: {
+          input: {
+            noise_reduction: {
+              type: 'near_field',
+            },
+            transcription: {
+              model,
+              language,
+              ...(prompt ? { prompt } : {}),
+            },
+            turn_detection: {
+              type: 'server_vad',
+              threshold: 0.5,
+              prefix_padding_ms: 300,
+              silence_duration_ms: 500,
+            },
+          },
+        },
+      };
+
+      const formData = new FormData();
+      formData.set('sdp', sdp);
+      formData.set('session', JSON.stringify(sessionConfig));
+
+      const realtimeResponse = await fetch('https://api.openai.com/v1/realtime/calls', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: formData,
+      });
+
+      const realtimeAnswer = await realtimeResponse.text();
+      if (!realtimeResponse.ok) {
+        throw new Error(realtimeAnswer || `Realtime session failed (${realtimeResponse.status}).`);
+      }
+
+      sendJson(response, 200, {
+        success: true,
+        data: {
+          sdp: realtimeAnswer,
+          model,
+          language,
+        },
+      });
+      return;
+    } catch (error) {
+      sendJson(response, 500, {
+        success: false,
+        error: error.message || 'Failed to create realtime transcription session.',
+      });
+      return;
+    }
   }
 
   if (request.method === 'POST' && url.pathname === '/api/transcribe') {

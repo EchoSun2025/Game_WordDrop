@@ -3,7 +3,9 @@ const STORAGE_KEYS = {
   mode: 'worddrop.mode',
 };
 
-const API_BASE_URL = 'http://localhost:3030';
+const API_BASE_URL = window.location.origin.startsWith('http')
+  ? window.location.origin
+  : 'http://localhost:3030';
 const WORDDROP_TRANSCRIBE_URL = `${API_BASE_URL}/api/transcribe`;
 
 const MODE_CONFIG = {
@@ -107,6 +109,8 @@ const state = {
   lastInterimTranscript: '',
   isListening: false,
   isTranscribing: false,
+  voiceTranscriber: null,
+  voicePurpose: null,
   mediaRecorder: null,
   mediaStream: null,
   audioChunks: [],
@@ -557,10 +561,13 @@ function stopNextRoundTimer() {
 }
 
 function stopListening() {
-  if (state.mediaRecorder && state.isListening) {
-    state.mediaRecorder.stop();
+  if (state.voiceTranscriber) {
+    state.voiceTranscriber.stop({ silent: true }).catch(() => {});
+    state.voiceTranscriber = null;
   }
+  state.voicePurpose = null;
   state.isListening = false;
+  state.isTranscribing = false;
   state.lastInterimTranscript = '';
   releaseAudioStream();
   renderChallengePanel();
@@ -879,7 +886,7 @@ function startRound() {
   state.waitingNextRound = false;
   state.currentRound = buildRound(target);
   refs.phoneFrame.classList.remove('round-complete');
-  setTranscript(state.isListening ? 'Voice: listening...' : 'Voice: ready');
+  setTranscript(state.isListening ? 'Voice: listening live...' : 'Voice: realtime ready');
   setFeedback('新一轮开始', MODE_CONFIG[state.mode].intro, target);
   updateHeader();
   renderFallingWord();
@@ -972,66 +979,107 @@ function setMode(mode) {
 }
 
 async function toggleRecognition(purpose) {
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    setTranscript('Voice: browser recording not supported');
+  if (!window.WordDropRealtimeTranscriber?.isSupported()) {
+    setTranscript('Voice: realtime transcription not supported');
     return;
   }
 
-  if (state.isListening) {
-    try {
-      setTranscript('Voice: uploading audio...');
-      const prompt =
-        purpose === 'sentence'
-          ? 'Transcribe the spoken English sentence accurately.'
-          : 'Transcribe the spoken English sentence accurately.';
-      const transcript = await stopAudioCaptureAndTranscribe({ language: 'en', prompt });
-      setListeningState(false);
-      setTranscript(`Voice final: ${transcript || 'no speech captured'}`);
-
-      if (purpose === 'sentence' && state.mode === 'sentence' && state.currentRound && transcript) {
-        let bestIndex = 0;
-        let bestScore = -1;
-        state.currentRound.options.forEach((option, index) => {
-          const score = scoreSentenceMatch(transcript, option.fullSentence);
-          if (score > bestScore) {
-            bestScore = score;
-            bestIndex = index;
-          }
-        });
-        handleSentenceChoice(bestIndex, transcript);
-      }
-
-      if (purpose === 'builder' && state.mode === 'builder') {
-        const textarea = document.getElementById('builderTextarea');
-        if (textarea) {
-          textarea.value = transcript;
-        }
-      }
-    } catch (error) {
-      setListeningState(false);
-      setTranscript(`Voice error: ${error.message || 'failed to transcribe'}`);
-    }
+  if (state.isListening || state.isTranscribing) {
+    stopListening();
+    setTranscript('Voice: realtime transcription stopped');
     return;
   }
 
   try {
-    await startAudioCapture();
+    const transcriber = new window.WordDropRealtimeTranscriber({
+      apiBaseUrl: API_BASE_URL,
+      language: 'en',
+      prompt: 'Transcribe the spoken English sentence accurately in real time.',
+      onStatus: (text) => {
+        if (state.isListening || state.isTranscribing) {
+          setTranscript(`Voice: ${text}`);
+        }
+      },
+      onInterim: (text) => {
+        state.lastInterimTranscript = text;
+        setTranscript(text ? `Voice live: ${text}` : 'Voice: processing speech...');
+      },
+      onFinal: async (transcript) => {
+        const finalText = transcript || '';
+        const currentPurpose = state.voicePurpose;
+        const activeTranscriber = state.voiceTranscriber;
+
+        state.lastInterimTranscript = '';
+        state.voiceTranscriber = null;
+        state.voicePurpose = null;
+        setListeningState(false);
+        setTranscribingState(false);
+        setTranscript(`Voice final: ${finalText || 'no speech captured'}`);
+
+        if (activeTranscriber) {
+          await activeTranscriber.stop({ silent: true });
+        }
+
+        if (!finalText) return;
+
+        if (currentPurpose === 'sentence' && state.mode === 'sentence' && state.currentRound) {
+          let bestIndex = 0;
+          let bestScore = -1;
+          state.currentRound.options.forEach((option, index) => {
+            const score = scoreSentenceMatch(finalText, option.fullSentence);
+            if (score > bestScore) {
+              bestScore = score;
+              bestIndex = index;
+            }
+          });
+          handleSentenceChoice(bestIndex, finalText);
+          return;
+        }
+
+        if (currentPurpose === 'builder' && state.mode === 'builder') {
+          const textarea = document.getElementById('builderTextarea');
+          if (textarea) {
+            textarea.value = finalText;
+          }
+        }
+      },
+      onError: (error) => {
+        state.voiceTranscriber = null;
+        state.voicePurpose = null;
+        setListeningState(false);
+        setTranscribingState(false);
+        setTranscript(`Voice error: ${error.message || 'failed to start realtime transcription'}`);
+      },
+    });
+
+    state.voiceTranscriber = transcriber;
+    state.voicePurpose = purpose;
+    setTranscribingState(true);
+    setTranscript('Voice: connecting realtime transcription...');
+    await transcriber.start({
+      language: 'en',
+      prompt: 'Transcribe the spoken English sentence accurately in real time.',
+    });
     state.lastInterimTranscript = '';
-    setTranscript('Voice: recording... click again to stop');
+    setTranscribingState(false);
     setListeningState(true);
+    setTranscript('Voice: listening live...');
   } catch (error) {
+    state.voiceTranscriber = null;
+    state.voicePurpose = null;
     setListeningState(false);
-    setTranscript(`Voice error: ${error.message || error.name || 'failed to start recording'}`);
+    setTranscribingState(false);
+    setTranscript(`Voice error: ${error.message || error.name || 'failed to start realtime transcription'}`);
   }
 }
 
 function setupRecognition() {
-  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-    setTranscript('Voice: browser recording not supported');
+  if (!window.WordDropRealtimeTranscriber?.isSupported()) {
+    setTranscript('Voice: realtime transcription not supported');
     return;
   }
 
-  setTranscript('Voice: OpenAI recording mode ready');
+  setTranscript('Voice: OpenAI realtime transcription ready');
 }
 
 function handleImport(event) {
