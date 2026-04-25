@@ -102,6 +102,8 @@ const state = {
   progress: 0,
   currentRound: null,
   sessionWords: [],
+  sessionActive: false,
+  isPaused: false,
   timer: null,
   nextRoundTimer: null,
   waitingNextRound: false,
@@ -137,6 +139,7 @@ const refs = {
   feedbackPos: document.getElementById('feedbackPos'),
   feedbackImage: document.getElementById('feedbackImage'),
   startButton: document.getElementById('startButton'),
+  pauseButton: document.getElementById('pauseButton'),
   importFile: document.getElementById('importFile'),
   resetPackButton: document.getElementById('resetPackButton'),
   phoneFrame: document.querySelector('.phone-frame'),
@@ -437,6 +440,13 @@ function updateHeader() {
   refs.modeValue.textContent = MODE_CONFIG[state.mode].label;
 }
 
+function updateControlButtons() {
+  if (refs.pauseButton) {
+    refs.pauseButton.disabled = !state.sessionActive;
+    refs.pauseButton.textContent = state.isPaused ? 'Resume' : 'Pause';
+  }
+}
+
 function setFeedback(title, text, item, extraTranscript) {
   refs.feedbackTitle.textContent = title;
   refs.feedbackText.textContent = text;
@@ -553,6 +563,17 @@ function stopTimer() {
   }
 }
 
+function startTimerLoop() {
+  stopTimer();
+  state.timer = window.setInterval(() => {
+    state.progress += (50 / MODE_CONFIG[state.mode].durationMs) * 100;
+    renderFallingWord();
+    if (state.progress >= 100) {
+      handleTimeout();
+    }
+  }, 50);
+}
+
 function stopNextRoundTimer() {
   if (state.nextRoundTimer) {
     window.clearTimeout(state.nextRoundTimer);
@@ -571,6 +592,36 @@ function stopListening() {
   state.lastInterimTranscript = '';
   releaseAudioStream();
   renderChallengePanel();
+}
+
+function maybeAutoStartBuilderVoice() {
+  if (
+    state.mode !== 'builder'
+    || !state.sessionActive
+    || state.isPaused
+    || state.waitingNextRound
+    || !state.currentRound
+    || state.currentRound.type !== 'builder'
+    || state.currentRound.result
+    || state.isListening
+    || state.isTranscribing
+  ) {
+    return;
+  }
+
+  window.setTimeout(() => {
+    if (
+      state.mode === 'builder'
+      && state.sessionActive
+      && !state.isPaused
+      && state.currentRound
+      && !state.currentRound.result
+      && !state.isListening
+      && !state.isTranscribing
+    ) {
+      toggleRecognition('builder');
+    }
+  }, 60);
 }
 
 function scoreSentenceMatch(transcript, sentence) {
@@ -615,6 +666,56 @@ function evaluateBuilderSubmission(text, target) {
   };
 }
 
+function handleBuilderSpeechTurn(text) {
+  if (!state.currentRound || state.mode !== 'builder' || state.waitingNextRound || state.isPaused) return;
+
+  const textarea = document.getElementById('builderTextarea');
+  if (textarea) {
+    textarea.value = text;
+  }
+
+  state.currentRound.submittedText = text;
+  const preview = evaluateBuilderSubmission(text, state.currentRound.target);
+  if (preview.valid) {
+    handleBuilderSubmit(text, text);
+    return;
+  }
+
+  setFeedback(
+    'Keep speaking',
+    `${preview.message} Keep talking until you finish a full sentence.`,
+    state.currentRound.target,
+    `Voice final: ${text}`,
+  );
+}
+
+function pauseSession() {
+  if (!state.sessionActive || state.isPaused || !state.currentRound) return;
+  state.isPaused = true;
+  stopTimer();
+  stopNextRoundTimer();
+  stopListening();
+  updateControlButtons();
+  setFeedback('Paused', 'Game paused. Click Resume to continue.', state.currentRound.target);
+}
+
+function resumeSession() {
+  if (!state.sessionActive || !state.isPaused || !state.currentRound) return;
+  state.isPaused = false;
+  updateControlButtons();
+  setFeedback('Resumed', MODE_CONFIG[state.mode].intro, state.currentRound.target);
+  if (state.waitingNextRound) {
+    state.nextRoundTimer = window.setTimeout(() => {
+      state.nextRoundTimer = null;
+      state.roundIndex += 1;
+      startRound();
+    }, 600);
+    return;
+  }
+  startTimerLoop();
+  maybeAutoStartBuilderVoice();
+}
+
 function revealRound(result, chosenIndex = null) {
   stopTimer();
   stopListening();
@@ -639,7 +740,7 @@ function applyReward(basePoints) {
 }
 
 function handleImageChoice(index) {
-  if (!state.currentRound || state.waitingNextRound) return;
+  if (!state.currentRound || state.waitingNextRound || state.isPaused) return;
   state.attempts += 1;
   const selected = state.currentRound.options[index];
   const target = state.currentRound.target;
@@ -663,7 +764,7 @@ function handleImageChoice(index) {
 }
 
 function handleSentenceChoice(index, transcript = '') {
-  if (!state.currentRound || state.waitingNextRound) return;
+  if (!state.currentRound || state.waitingNextRound || state.isPaused) return;
   state.attempts += 1;
   const selected = state.currentRound.options[index];
   const target = state.currentRound.target;
@@ -698,7 +799,7 @@ function handleSentenceChoice(index, transcript = '') {
 }
 
 function handleBuilderSubmit(text, transcript = '') {
-  if (!state.currentRound || state.waitingNextRound) return;
+  if (!state.currentRound || state.waitingNextRound || state.isPaused) return;
   const target = state.currentRound.target;
   const result = evaluateBuilderSubmission(text, target);
   state.attempts += 1;
@@ -733,7 +834,7 @@ function handleBuilderSubmit(text, transcript = '') {
 }
 
 function handleTimeout() {
-  if (!state.currentRound || state.waitingNextRound) return;
+  if (!state.currentRound || state.waitingNextRound || state.isPaused) return;
   state.attempts += 1;
   state.streak = 0;
   state.played += 1;
@@ -807,7 +908,7 @@ function renderSentencePanel() {
   `;
 }
 
-function renderBuilderPanel() {
+function renderBuilderPanelAuto() {
   const target = state.currentRound.target;
   const submitted = state.currentRound.submittedText || '';
   return `
@@ -875,6 +976,19 @@ function renderChallengePanel() {
   }
 }
 
+function renderBuilderPanel() {
+  const target = state.currentRound.target;
+  const submitted = state.currentRound.submittedText || '';
+  return `
+    <div class="builder-panel">
+      <p class="tiny-label">PROMPT</p>
+      <p class="builder-prompt">Say a full sentence with <strong>${escapeHtml(target.word)}</strong>. Voice stays on until you pause the game.</p>
+      <textarea id="builderTextarea" class="builder-textarea" placeholder="Your live sentence will appear here..." readonly>${escapeHtml(submitted)}</textarea>
+      <p class="builder-helper">The game listens continuously, auto-detects sentence endings, and scores as soon as your sentence is complete.</p>
+    </div>
+  `;
+}
+
 function startRound() {
   if (state.roundIndex >= state.sessionWords.length) {
     finishSession();
@@ -889,23 +1003,19 @@ function startRound() {
   setTranscript(state.isListening ? 'Voice: listening live...' : 'Voice: realtime ready');
   setFeedback('新一轮开始', MODE_CONFIG[state.mode].intro, target);
   updateHeader();
+  updateControlButtons();
   renderFallingWord();
   renderChallengePanel();
-  stopTimer();
-
-  state.timer = window.setInterval(() => {
-    state.progress += (50 / MODE_CONFIG[state.mode].durationMs) * 100;
-    renderFallingWord();
-    if (state.progress >= 100) {
-      handleTimeout();
-    }
-  }, 50);
+  startTimerLoop();
+  maybeAutoStartBuilderVoice();
 }
 
 function finishSession() {
   stopTimer();
   stopNextRoundTimer();
   stopListening();
+  state.sessionActive = false;
+  state.isPaused = false;
   state.currentRound = null;
   refs.phoneFrame.classList.remove('round-complete');
   refs.fallingWord.textContent = 'FINISH';
@@ -919,12 +1029,15 @@ function finishSession() {
     state.sessionWords[state.sessionWords.length - 1] || state.pack.words[0],
   );
   updateHeader();
+  updateControlButtons();
 }
 
 function resetSessionState() {
   stopTimer();
   stopNextRoundTimer();
   stopListening();
+  state.sessionActive = false;
+  state.isPaused = false;
   state.roundIndex = 0;
   state.score = 0;
   state.energy = 0;
@@ -939,6 +1052,7 @@ function resetSessionState() {
   refs.phoneFrame.classList.remove('round-complete');
   renderFallingWord();
   updateHeader();
+  updateControlButtons();
 }
 
 function startSession() {
@@ -963,7 +1077,10 @@ function startSession() {
   state.hits = 0;
   state.streak = 0;
   state.progress = 0;
+  state.sessionActive = true;
+  state.isPaused = false;
   state.sessionWords = pool;
+  updateControlButtons();
   startRound();
 }
 
@@ -984,6 +1101,11 @@ async function toggleRecognition(purpose) {
     return;
   }
 
+  if (state.isPaused) {
+    setTranscript('Voice: game is paused');
+    return;
+  }
+
   if (state.isListening || state.isTranscribing) {
     stopListening();
     setTranscript('Voice: realtime transcription stopped');
@@ -991,6 +1113,7 @@ async function toggleRecognition(purpose) {
   }
 
   try {
+    const isContinuousBuilder = purpose === 'builder';
     const transcriber = new window.WordDropRealtimeTranscriber({
       apiBaseUrl: API_BASE_URL,
       language: 'en',
@@ -1003,26 +1126,32 @@ async function toggleRecognition(purpose) {
       onInterim: (text) => {
         state.lastInterimTranscript = text;
         setTranscript(text ? `Voice live: ${text}` : 'Voice: processing speech...');
+        if (isContinuousBuilder && state.mode === 'builder') {
+          const textarea = document.getElementById('builderTextarea');
+          if (textarea) {
+            textarea.value = text;
+          }
+        }
       },
       onFinal: async (transcript) => {
         const finalText = transcript || '';
         const currentPurpose = state.voicePurpose;
         const activeTranscriber = state.voiceTranscriber;
+        const keepOpen = currentPurpose === 'builder' && state.mode === 'builder' && state.sessionActive && !state.isPaused;
 
         state.lastInterimTranscript = '';
-        state.voiceTranscriber = null;
-        state.voicePurpose = null;
-        setListeningState(false);
-        setTranscribingState(false);
         setTranscript(`Voice final: ${finalText || 'no speech captured'}`);
-
-        if (activeTranscriber) {
-          await activeTranscriber.stop({ silent: true });
-        }
 
         if (!finalText) return;
 
         if (currentPurpose === 'sentence' && state.mode === 'sentence' && state.currentRound) {
+          state.voiceTranscriber = null;
+          state.voicePurpose = null;
+          setListeningState(false);
+          setTranscribingState(false);
+          if (activeTranscriber) {
+            await activeTranscriber.stop({ silent: true });
+          }
           let bestIndex = 0;
           let bestScore = -1;
           state.currentRound.options.forEach((option, index) => {
@@ -1036,11 +1165,21 @@ async function toggleRecognition(purpose) {
           return;
         }
 
-        if (currentPurpose === 'builder' && state.mode === 'builder') {
-          const textarea = document.getElementById('builderTextarea');
-          if (textarea) {
-            textarea.value = finalText;
-          }
+        if (keepOpen) {
+          state.voiceTranscriber = activeTranscriber;
+          state.voicePurpose = currentPurpose;
+          setListeningState(true);
+          setTranscribingState(false);
+          handleBuilderSpeechTurn(finalText);
+          return;
+        }
+
+        state.voiceTranscriber = null;
+        state.voicePurpose = null;
+        setListeningState(false);
+        setTranscribingState(false);
+        if (activeTranscriber) {
+          await activeTranscriber.stop({ silent: true });
         }
       },
       onError: (error) => {
@@ -1121,11 +1260,18 @@ refs.modeButtons.forEach((button) => {
 });
 
 refs.startButton.addEventListener('click', startSession);
+refs.pauseButton?.addEventListener('click', () => {
+  if (state.isPaused) {
+    resumeSession();
+  } else {
+    pauseSession();
+  }
+});
 refs.importFile.addEventListener('change', handleImport);
 refs.resetPackButton.addEventListener('click', handleResetPack);
 
 window.addEventListener('keydown', (event) => {
-  if (!state.currentRound || state.waitingNextRound) return;
+  if (!state.currentRound || state.waitingNextRound || state.isPaused) return;
 
   if ((state.mode === 'image' || state.mode === 'sentence') && ['1', '2', '3'].includes(event.key)) {
     const choice = Number(event.key) - 1;

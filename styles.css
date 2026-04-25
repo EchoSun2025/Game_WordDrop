@@ -523,6 +523,12 @@ label {
   margin-top: 14px;
 }
 
+.control-actions {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+
 .primary-button {
   width: 100%;
   padding: 14px 16px;
@@ -533,6 +539,15 @@ label {
   font-size: 1rem;
   font-weight: 800;
   cursor: pointer;
+}
+
+.control-actions .primary-button {
+  flex: 1 1 auto;
+}
+
+.control-actions .ghost-button {
+  flex: 0 0 auto;
+  min-width: 92px;
 }
 
 .hint-text {

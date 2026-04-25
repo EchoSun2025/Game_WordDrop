@@ -22,6 +22,9 @@ const realtimeTranscribeModel =
   process.env.OPENAI_REALTIME_TRANSCRIBE_MODEL
   || process.env.OPENAI_TRANSCRIBE_MODEL
   || 'gpt-4o-mini-transcribe';
+const realtimeVadThreshold = Number(process.env.OPENAI_REALTIME_VAD_THRESHOLD) || 0.45;
+const realtimeVadPrefixPaddingMs = Number(process.env.OPENAI_REALTIME_VAD_PREFIX_MS) || 200;
+const realtimeVadSilenceMs = Number(process.env.OPENAI_REALTIME_VAD_SILENCE_MS) || 280;
 
 function setCorsHeaders(response) {
   response.setHeader('Access-Control-Allow-Origin', '*');
@@ -188,9 +191,9 @@ const server = http.createServer(async (request, response) => {
             },
             turn_detection: {
               type: 'server_vad',
-              threshold: 0.5,
-              prefix_padding_ms: 300,
-              silence_duration_ms: 500,
+              threshold: realtimeVadThreshold,
+              prefix_padding_ms: realtimeVadPrefixPaddingMs,
+              silence_duration_ms: realtimeVadSilenceMs,
             },
           },
         },

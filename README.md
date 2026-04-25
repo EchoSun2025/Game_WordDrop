@@ -2,6 +2,7 @@
 
 Speech note: the standalone speech server uses `WORDDROP_PORT` and defaults to `3030`; it does not reuse the parent LexiLand `PORT=3000`.
 Realtime note: open `http://localhost:3030/index.html` or `http://localhost:3030/speech-test.html` after `npm run server` so microphone permissions and realtime transcription stay stable.
+Latency note: you can tune realtime end-of-sentence speed with `OPENAI_REALTIME_VAD_THRESHOLD`, `OPENAI_REALTIME_VAD_PREFIX_MS`, and `OPENAI_REALTIME_VAD_SILENCE_MS`.
 
 独立词汇小游戏原型仓库。
 
