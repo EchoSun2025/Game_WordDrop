@@ -56,7 +56,7 @@ function readRequestBody(request) {
 
 function decodeBase64Audio(dataUrlOrBase64) {
   if (dataUrlOrBase64.startsWith('data:')) {
-    const match = dataUrlOrBase64.match(/^data:audio\/[a-zA-Z0-9+.-]+;base64,(.+)$/);
+    const match = dataUrlOrBase64.match(/^data:audio\/[a-zA-Z0-9+.-]+(?:;[a-zA-Z0-9=+.-]+)*;base64,(.+)$/);
     if (!match) {
       throw new Error('Malformed audio data URL.');
     }
@@ -73,6 +73,44 @@ function getAudioExtension(mimeType = '') {
   if (normalized.includes('mpeg') || normalized.includes('mp3')) return 'mp3';
   if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a';
   return 'webm';
+}
+
+function getContentType(filePath) {
+  const extension = path.extname(filePath).toLowerCase();
+  if (extension === '.html') return 'text/html; charset=utf-8';
+  if (extension === '.js') return 'application/javascript; charset=utf-8';
+  if (extension === '.css') return 'text/css; charset=utf-8';
+  if (extension === '.json') return 'application/json; charset=utf-8';
+  if (extension === '.png') return 'image/png';
+  if (extension === '.jpg' || extension === '.jpeg') return 'image/jpeg';
+  if (extension === '.webp') return 'image/webp';
+  if (extension === '.svg') return 'image/svg+xml';
+  if (extension === '.mp3') return 'audio/mpeg';
+  if (extension === '.wav') return 'audio/wav';
+  return 'application/octet-stream';
+}
+
+function serveStaticFile(response, pathname) {
+  const requestedPath = pathname === '/' ? '/index.html' : pathname;
+  const safeRelativePath = path.normalize(requestedPath).replace(/^(\.\.[/\\])+/, '');
+  const filePath = path.resolve('.', `.${safeRelativePath}`);
+  const workspaceRoot = path.resolve('.');
+
+  if (!filePath.startsWith(workspaceRoot)) {
+    sendJson(response, 403, {
+      success: false,
+      error: 'Forbidden.',
+    });
+    return true;
+  }
+
+  if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+    return false;
+  }
+
+  response.writeHead(200, { 'Content-Type': getContentType(filePath) });
+  fs.createReadStream(filePath).pipe(response);
+  return true;
 }
 
 const server = http.createServer(async (request, response) => {
@@ -180,6 +218,10 @@ const server = http.createServer(async (request, response) => {
       });
       return;
     }
+  }
+
+  if (request.method === 'GET' && serveStaticFile(response, url.pathname)) {
+    return;
   }
 
   sendJson(response, 404, {
