@@ -554,6 +554,19 @@ label {
   cursor: pointer;
 }
 
+.retry-button {
+  width: 100%;
+  padding: 13px 16px;
+  border-radius: 18px;
+  font-size: 0.98rem;
+}
+
+.retry-button:disabled,
+.primary-button:disabled {
+  opacity: 0.58;
+  cursor: default;
+}
+
 .hint-text {
   margin: 0;
   color: var(--ink-soft);

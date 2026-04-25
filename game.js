@@ -2,6 +2,7 @@ const STORAGE_KEYS = {
   pack: 'worddrop.importedPack',
   mode: 'worddrop.mode',
 };
+const DEFAULT_REMOTE_PACK_URL = './data/lexiland-april-2026-image-words.json';
 
 const API_BASE_URL = window.location.origin.startsWith('http')
   ? window.location.origin
@@ -102,8 +103,12 @@ const state = {
   progress: 0,
   currentRound: null,
   sessionWords: [],
+  retryWrongOnly: false,
+  wrongWordIds: new Set(),
   sessionActive: false,
   isPaused: false,
+  isPreparingPack: false,
+  preloadedPackKey: '',
   timer: null,
   nextRoundTimer: null,
   waitingNextRound: false,
@@ -139,6 +144,7 @@ const refs = {
   feedbackPos: document.getElementById('feedbackPos'),
   feedbackImage: document.getElementById('feedbackImage'),
   startButton: document.getElementById('startButton'),
+  retryWrongButton: document.getElementById('retryWrongButton'),
   pauseButton: document.getElementById('pauseButton'),
   importFile: document.getElementById('importFile'),
   resetPackButton: document.getElementById('resetPackButton'),
@@ -397,17 +403,63 @@ function saveImportedPack(pack) {
   localStorage.setItem(STORAGE_KEYS.pack, JSON.stringify(pack));
 }
 
-function loadInitialPack() {
+function getWrongWordsStorageKey(pack) {
+  return `worddrop.wrongWords.${pack.name}`;
+}
+
+function loadWrongWordIds(pack) {
+  try {
+    const stored = JSON.parse(localStorage.getItem(getWrongWordsStorageKey(pack)) || '[]');
+    return new Set(Array.isArray(stored) ? stored : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveWrongWordIds(pack) {
+  localStorage.setItem(getWrongWordsStorageKey(pack), JSON.stringify([...state.wrongWordIds]));
+}
+
+function markWordAsWrong(wordId) {
+  state.wrongWordIds.add(wordId);
+  saveWrongWordIds(state.pack);
+  updateControlButtons();
+}
+
+function clearWordFromWrong(wordId) {
+  if (!state.wrongWordIds.has(wordId)) return;
+  state.wrongWordIds.delete(wordId);
+  saveWrongWordIds(state.pack);
+  updateControlButtons();
+}
+
+async function loadInitialPackLegacy() {
   const stored = localStorage.getItem(STORAGE_KEYS.pack);
   if (!stored) {
-    return normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
+    try {
+      const response = await fetch(DEFAULT_REMOTE_PACK_URL);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const remotePack = normalizePack(await response.json(), 'LexiLand April 2026');
+      saveImportedPack(remotePack);
+      return remotePack;
+    } catch {
+      return normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
+    }
   }
 
   try {
     return normalizePack(JSON.parse(stored), 'Imported Pack');
   } catch {
     localStorage.removeItem(STORAGE_KEYS.pack);
-    return normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
+    try {
+      const response = await fetch(DEFAULT_REMOTE_PACK_URL);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const remotePack = normalizePack(await response.json(), 'LexiLand April 2026');
+      saveImportedPack(remotePack);
+      return remotePack;
+    } catch {
+      return normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
+    }
   }
 }
 
@@ -420,6 +472,40 @@ function getPlayableWords(mode) {
     return words.filter((item) => getSentenceSource(item) && item.image);
   }
   return words.filter((item) => (item.context || item.example || item.definition) && item.image);
+}
+
+function getRetryPlayableWords(mode) {
+  return getPlayableWords(mode).filter((item) => state.wrongWordIds.has(item.id));
+}
+
+function getPackPreloadKey(pack) {
+  return `${pack.name}:${pack.words.length}`;
+}
+
+function preloadImage(src) {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve({ ok: true, src });
+    image.onerror = () => resolve({ ok: false, src });
+    image.src = src;
+  });
+}
+
+async function ensurePackImagesReady(pack) {
+  const preloadKey = getPackPreloadKey(pack);
+  if (state.preloadedPackKey === preloadKey) return;
+
+  state.isPreparingPack = true;
+  updateControlButtons();
+  setFeedback('Loading...', 'Loading images for smoother play.', pack.words[0]);
+
+  const imageUrls = [...new Set(
+    pack.words.flatMap((item) => [item.image, ...(item.images || [])]).filter(Boolean),
+  )];
+  await Promise.all(imageUrls.map((src) => preloadImage(src)));
+  state.preloadedPackKey = preloadKey;
+  state.isPreparingPack = false;
+  updateControlButtons();
 }
 
 function updatePackMeta() {
@@ -444,6 +530,17 @@ function updateControlButtons() {
   if (refs.pauseButton) {
     refs.pauseButton.disabled = !state.sessionActive;
     refs.pauseButton.textContent = state.isPaused ? 'Resume' : 'Pause';
+  }
+
+  if (refs.startButton) {
+    refs.startButton.disabled = state.isPreparingPack;
+    refs.startButton.textContent = state.isPreparingPack ? 'Loading Images...' : '开始 / 重新开始';
+  }
+
+  if (refs.retryWrongButton) {
+    const availableWrongWords = getRetryPlayableWords(state.mode).length;
+    refs.retryWrongButton.disabled = state.isPreparingPack || availableWrongWords < MODE_CONFIG[state.mode].minimumWords;
+    refs.retryWrongButton.textContent = availableWrongWords > 0 ? `错词再来 (${availableWrongWords})` : '错词再来';
   }
 }
 
@@ -748,12 +845,14 @@ function handleImageChoice(index) {
   if (selected.id === target.id) {
     state.hits += 1;
     state.streak += 1;
+    clearWordFromWrong(target.id);
     applyReward(10);
     revealRound('correct', index);
     setFeedback('命中', `图片匹配成功。得分 +${10 * getLevel()}。`, target);
     speakWord(target.word);
   } else {
     state.streak = 0;
+    markWordAsWrong(target.id);
     revealRound('wrong', index);
     setFeedback('选错了', `正确图片对应 ${target.word} / ${target.zh}。`, target);
   }
@@ -772,6 +871,7 @@ function handleSentenceChoice(index, transcript = '') {
   if (selected.item.id === target.id) {
     state.hits += 1;
     state.streak += 1;
+    clearWordFromWrong(target.id);
     applyReward(12);
     revealRound('correct', index);
     setFeedback(
@@ -783,6 +883,7 @@ function handleSentenceChoice(index, transcript = '') {
     speakWord(target.word);
   } else {
     state.streak = 0;
+    markWordAsWrong(target.id);
     revealRound('wrong', index);
     const correct = state.currentRound.options.find((option) => option.item.id === target.id);
     setFeedback(
@@ -808,6 +909,7 @@ function handleBuilderSubmit(text, transcript = '') {
   if (result.valid) {
     state.hits += 1;
     state.streak += 1;
+    clearWordFromWrong(target.id);
     applyReward(14 + result.bonus);
     revealRound('correct');
     setFeedback(
@@ -819,6 +921,7 @@ function handleBuilderSubmit(text, transcript = '') {
     speakWord(target.word);
   } else {
     state.streak = 0;
+    markWordAsWrong(target.id);
     revealRound('wrong');
     setFeedback(
       '造句未通过',
@@ -838,6 +941,7 @@ function handleTimeout() {
   state.attempts += 1;
   state.streak = 0;
   state.played += 1;
+  markWordAsWrong(state.currentRound.target.id);
 
   revealRound('timeout');
   if (state.mode === 'sentence') {
@@ -1048,6 +1152,7 @@ function resetSessionState() {
   state.progress = 0;
   state.currentRound = null;
   state.sessionWords = [];
+  state.retryWrongOnly = false;
   state.waitingNextRound = false;
   refs.phoneFrame.classList.remove('round-complete');
   renderFallingWord();
@@ -1055,7 +1160,7 @@ function resetSessionState() {
   updateControlButtons();
 }
 
-function startSession() {
+function startSessionLegacy() {
   resetSessionState();
 
   const pool = shuffle(getPlayableWords(state.mode));
@@ -1221,7 +1326,7 @@ function setupRecognition() {
   setTranscript('Voice: OpenAI realtime transcription ready');
 }
 
-function handleImport(event) {
+function handleImportLegacy(event) {
   const [file] = event.target.files || [];
   if (!file) return;
 
@@ -1244,13 +1349,152 @@ function handleImport(event) {
   reader.readAsText(file, 'utf-8');
 }
 
-function handleResetPack() {
+function handleResetPackLegacy() {
   localStorage.removeItem(STORAGE_KEYS.pack);
   state.pack = normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
   resetSessionState();
   updatePackMeta();
   setFeedback('已恢复内置包', '当前数据已切回内置 Starter Pack。', state.pack.words[0]);
   renderChallengePanel();
+}
+
+async function fetchDefaultPack() {
+  try {
+    const response = await fetch(DEFAULT_REMOTE_PACK_URL);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return normalizePack(await response.json(), 'LexiLand April 2026');
+  } catch {
+    return normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
+  }
+}
+
+async function applyActivePack(pack, options = {}) {
+  const {
+    persist = true,
+    feedbackTitle = 'Pack Ready',
+    feedbackText = 'The word pack is ready. Press Start to play.',
+  } = options;
+
+  state.pack = pack;
+  state.wrongWordIds = loadWrongWordIds(pack);
+  state.preloadedPackKey = '';
+
+  if (persist) {
+    saveImportedPack(pack);
+  }
+
+  resetSessionState();
+  updatePackMeta();
+  renderChallengePanel();
+  setFeedback(feedbackTitle, feedbackText, pack.words[0]);
+  await ensurePackImagesReady(pack);
+  setFeedback(feedbackTitle, feedbackText, pack.words[0]);
+}
+
+async function handleImport(event) {
+  const [file] = event.target.files || [];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const parsed = JSON.parse(String(reader.result));
+      const pack = normalizePack(parsed, file.name.replace(/\.json$/i, ''));
+      await applyActivePack(pack, {
+        feedbackTitle: 'Import Complete',
+        feedbackText: `${pack.name} is loaded and ready to play.`,
+      });
+    } catch (error) {
+      setFeedback('Import Failed', error.message || 'Could not read this JSON file.', state.pack.words[0]);
+    }
+    refs.importFile.value = '';
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+async function handleResetPack() {
+  localStorage.removeItem(STORAGE_KEYS.pack);
+  const pack = await fetchDefaultPack();
+  await applyActivePack(pack, {
+    feedbackTitle: 'Default Pack Loaded',
+    feedbackText: `${pack.name} is ready to play.`,
+  });
+}
+
+async function startSession(options = {}) {
+  const { retryWrongOnly = false } = options;
+
+  resetSessionState();
+  await ensurePackImagesReady(state.pack);
+
+  const sourceWords = retryWrongOnly ? getRetryPlayableWords(state.mode) : getPlayableWords(state.mode);
+  const pool = shuffle(sourceWords);
+
+  if (pool.length < MODE_CONFIG[state.mode].minimumWords) {
+    state.sessionWords = [];
+    state.currentRound = null;
+    state.retryWrongOnly = retryWrongOnly;
+    updateHeader();
+    renderFallingWord();
+
+    const emptyMessage = retryWrongOnly
+      ? 'No saved wrong words for this mode yet.'
+      : `This pack does not have enough words for ${MODE_CONFIG[state.mode].label}.`;
+    const feedbackTitle = retryWrongOnly ? 'No Wrong Words Yet' : 'Not Enough Words';
+    const feedbackText = retryWrongOnly
+      ? 'Play one full round first. Wrong answers will appear here automatically.'
+      : 'Import a larger pack with images and sentence data to use this mode.';
+
+    renderEmptyState(emptyMessage);
+    setFeedback(feedbackTitle, feedbackText, state.pack.words[0]);
+    updateControlButtons();
+    return;
+  }
+
+  state.retryWrongOnly = retryWrongOnly;
+  state.sessionActive = true;
+  state.isPaused = false;
+  state.sessionWords = pool;
+  updateControlButtons();
+  startRound();
+}
+
+async function loadInitialPack() {
+  const stored = localStorage.getItem(STORAGE_KEYS.pack);
+  if (!stored) {
+    const pack = await fetchDefaultPack();
+    saveImportedPack(pack);
+    return pack;
+  }
+
+  try {
+    const pack = normalizePack(JSON.parse(stored), 'Imported Pack');
+    if (pack.name === DEFAULT_PACK.name) {
+      const remotePack = await fetchDefaultPack();
+      saveImportedPack(remotePack);
+      return remotePack;
+    }
+    return pack;
+  } catch {
+    localStorage.removeItem(STORAGE_KEYS.pack);
+    const pack = await fetchDefaultPack();
+    saveImportedPack(pack);
+    return pack;
+  }
+}
+
+async function initializeApp() {
+  state.pack = await loadInitialPack();
+  state.wrongWordIds = loadWrongWordIds(state.pack);
+  setupRecognition();
+  setMode(state.mode);
+  updatePackMeta();
+  updateHeader();
+  renderFallingWord();
+  renderChallengePanel();
+  setFeedback('Ready', `${state.pack.name} is loaded. Press Start to play.`, state.pack.words[0]);
+  await ensurePackImagesReady(state.pack);
+  setFeedback('Ready', `${state.pack.name} is loaded. Press Start to play.`, state.pack.words[0]);
 }
 
 refs.modeButtons.forEach((button) => {
@@ -1260,6 +1504,9 @@ refs.modeButtons.forEach((button) => {
 });
 
 refs.startButton.addEventListener('click', startSession);
+refs.retryWrongButton?.addEventListener('click', () => {
+  startSession({ retryWrongOnly: true });
+});
 refs.pauseButton?.addEventListener('click', () => {
   if (state.isPaused) {
     resumeSession();
@@ -1288,7 +1535,9 @@ window.addEventListener('keydown', (event) => {
   }
 });
 
-state.pack = loadInitialPack();
+state.pack = normalizePack(DEFAULT_PACK, DEFAULT_PACK.name);
+state.isPreparingPack = true;
+initializeApp();
 setupRecognition();
 setMode(state.mode);
 updatePackMeta();
